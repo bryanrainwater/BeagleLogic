@@ -1,6 +1,8 @@
 [Unit]
 Description=BeagleLogic Logic Analyzer
 ConditionPathExists=|DIR
+After=beaglelogic-startup.service
+Requires=beaglelogic-startup.service
 
 [Service]
 WorkingDirectory=DIR/server

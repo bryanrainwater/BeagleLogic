@@ -1,11 +1,13 @@
 [Unit]
-Description=BeagleLogic Logic Analyzer TCP Service
+Description=BeagleLogic Logic Analyzer TCP Service (PulseView)
 ConditionPathExists=|DIR
+After=beaglelogic-startup.service
+Requires=beaglelogic-startup.service
 
 [Service]
-WorkingDirectory=DIR/tcp-server-go
+WorkingDirectory=DIR/tcp-server-node
 EnvironmentFile=/etc/default/beaglelogic-tcp
-ExecStart=DIR/tcp-server-go/server
+ExecStart=/usr/bin/node DIR/tcp-server-node/server.js
 SyslogIdentifier=beaglelogic-tcp
 Restart=on-failure
 User=1000
