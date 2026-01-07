@@ -13,7 +13,6 @@ var express = require('express'),
 
 // all environments
 app.set('port', process.env.PORT || 4000);
-app.use(express.favicon());
 // app.use(express.logger('dev'));
 app.use(express.static(path.join(__dirname, '../webapp')));
 
@@ -103,7 +102,7 @@ function connectionHandler(socket) {
 		t1 = process.hrtime();
 
 		console.log('L='+ LZ4.encodeBound(buf.length));
-		var output = new Buffer( LZ4.encodeBound(buf.length) );
+		var output = Buffer.alloc( LZ4.encodeBound(buf.length) );
 
 		// block compression (no archive format)
 		var compressedSize = LZ4.encodeBlock(buf, output);

@@ -21,7 +21,6 @@ usr/
 libserialport/
 libsigrok/
 libsigrokdecode/
-pulseview/
 sigrok-cli/
 sigrok-dumps/
 sigrok-util/
