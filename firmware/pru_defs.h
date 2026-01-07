@@ -1,15 +1,41 @@
+/**
+ * @file pru_defs.h
+ * @brief Common definitions and macros for BeagleLogic PRU firmware
+ *
+ * This header provides hardware register access macros, PRU control functions,
+ * interrupt definitions, and timing utilities for both PRU0 and PRU1 firmware.
+ *
+ * Updated for PRU Software Support Package v6.5+
+ */
+
 #ifndef PRU_DEFS_H
 #define PRU_DEFS_H
 
 #include <stdint.h>
 
+/* PRU hardware register definitions */
 #include <pru_cfg.h>
 #include <pru_ctrl.h>
 #include <pru_intc.h>
 
-volatile register uint32_t __R31;
-volatile register uint32_t __R30;
+/* PRU I/O registers (R30, R31) */
+#ifdef __GNUC__
+#include <pru/io.h>
+#else
+volatile register uint32_t __R31;  /* Input/interrupt register */
+volatile register uint32_t __R30;  /* Output register */
+#endif
 
+/*
+ * PRU Control Register Access Macros
+ *
+ * These macros provide access to the PRU control registers for this PRU
+ * and the other PRU in the pair.
+ *
+ * Base addresses:
+ *   PRU0 control: 0x22000
+ *   PRU1 control: 0x24000
+ */
 #if defined(PRU0) || defined(PRU1)
 
 #ifdef PRU0
@@ -51,12 +77,18 @@ volatile register uint32_t __R30;
 
 #endif
 
+/**
+ * SIGNAL_EVENT - Trigger a system event to the ARM or other PRU
+ * @x: System event number (16-31)
+ *
+ * Writes to R31 to trigger an interrupt. The event number must be
+ * in the range 16-31 (subtract 16 when writing to R31[4:0]).
+ */
 #define SIGNAL_EVENT(x) \
-	__R31 = (1 << 5) | ((x) - 16); \
-
+	__R31 = (1 << 5) | ((x) - 16);
 
 #ifndef PRU_CLK
-/* default PRU clock (200MHz) */
+/* Default PRU core clock frequency (200 MHz) */
 #define PRU_CLK	200000000
 #endif
 
@@ -89,21 +121,31 @@ volatile register uint32_t __R30;
 #define PRU_ns_err(x)	PRU_200MHz_ns_err(x)
 #endif
 
+/* Shared DRAM base address */
 #define DPRAM_SHARED	0x00010000
 
-/* event definitions */
-#define SYSEV_PRU0_TO_ARM	16
-#define SYSEV_ARM_TO_PRU0	17
+/**
+ * System Event Definitions
+ *
+ * These events are used for interrupt communication between:
+ * - PRU0 <-> ARM kernel
+ * - PRU1 <-> ARM kernel
+ * - PRU0 <-> PRU1
+ *
+ * Updated for consistency with kernel 6.17+ interrupt mapping.
+ */
+#define SYSEV_PRU0_TO_ARM	16  /* PRU0 signals ARM (general) */
+#define SYSEV_ARM_TO_PRU0	17  /* ARM signals PRU0 (general) */
 
-#define SYSEV_PRU1_TO_ARM	18
-#define SYSEV_ARM_TO_PRU1	19
+#define SYSEV_PRU1_TO_ARM	18  /* PRU1 signals ARM */
+#define SYSEV_ARM_TO_PRU1	19  /* ARM signals PRU1 */
 
-#define SYSEV_PRU0_TO_PRU1	21
-#define SYSEV_PRU1_TO_PRU0	20
+#define SYSEV_PRU1_TO_PRU0	20  /* PRU1 signals PRU0 */
+#define SYSEV_PRU0_TO_PRU1	21  /* PRU0 signals PRU1 */
 
-#define SYSEV_PRU0_TO_ARM_A	22
-#define SYSEV_ARM_TO_PRU0_A	23
-#define SYSEV_PRU0_TO_ARM_B	24
+#define SYSEV_PRU0_TO_ARM_A	22  /* PRU0 -> ARM (buffer ready) */
+#define SYSEV_ARM_TO_PRU0_A	23  /* ARM -> PRU0 (stop request) */
+#define SYSEV_PRU0_TO_ARM_B	24  /* PRU0 -> ARM (capture complete) */
 
 #define pru0_signal() (__R31 & (1U << 30))
 #define pru1_signal() (__R31 & (1U << 31))
@@ -127,7 +169,7 @@ volatile register uint32_t __R30;
 /* all events < 32 */
 #define SYSEV_THIS_PRU_INCOMING_MASK	\
 	(BIT(SYSEV_ARM_TO_THIS_PRU) | \
-	 BIT(SYSEV_OTHER_PRU_TO_THIS_PRU) | \
+	 BIT(SYSEV_OTHER_PRU_TO_THIS_PRU))
 
 #define DELAY_CYCLES(x) \
 	do { \
@@ -141,44 +183,75 @@ volatile register uint32_t __R30;
 #define BIT(x) (1U << (x))
 #endif
 
-/* access to the resources of the other PRU (halt it and have your way) */
+/**
+ * Inter-PRU Communication Functions
+ *
+ * These functions allow one PRU to access the registers of the other PRU.
+ * The target PRU is halted, accessed, and then resumed.
+ */
 #if defined(PRU0) || defined(PRU1)
 
+/**
+ * pru_other_halt - Halt the other PRU
+ *
+ * Clears the ENABLE bit and waits for RUNSTATE to clear.
+ */
 static inline void pru_other_halt(void)
 {
-	PCTRL_OTHER(0x0000) &= ~CONTROL_ENABLE;	/* clear enable */
-	/* loop until RUNSTATE clears */
+	PCTRL_OTHER(0x0000) &= ~CONTROL_ENABLE;
 	while ((PCTRL_OTHER(0x0000) & CONTROL_RUNSTATE) != 0)
 		;
 }
 
+/**
+ * pru_other_resume - Resume the other PRU
+ *
+ * Sets the ENABLE bit to restart execution.
+ */
 static inline void pru_other_resume(void)
 {
-	PCTRL_OTHER(0x0000) |= CONTROL_ENABLE;	/* set enable */
+	PCTRL_OTHER(0x0000) |= CONTROL_ENABLE;
 }
 
+/**
+ * pru_other_read_reg - Read a register from the other PRU
+ * @reg: Register number (0-31, will be multiplied by 4 for byte offset)
+ *
+ * Return: Register value
+ */
 static inline uint32_t pru_other_read_reg(uint16_t reg)
 {
 	uint32_t val;
 
-	reg <<= 2;	/* multiply by 4 */
+	reg <<= 2;  /* Convert register number to byte offset */
 	pru_other_halt();
 	val = PDBG_OTHER(reg);
 	pru_other_resume();
 	return val;
 }
 
+/**
+ * pru_other_write_reg - Write a register in the other PRU
+ * @reg: Register number (0-31)
+ * @val: Value to write
+ */
 static inline void pru_other_write_reg(uint16_t reg, uint32_t val)
 {
-	reg <<= 2;	/* multiply by 4 */
+	reg <<= 2;
 	pru_other_halt();
 	PDBG_OTHER(reg) = val;
 	pru_other_resume();
 }
 
+/**
+ * pru_other_and_or_reg - Read-modify-write a register in the other PRU
+ * @reg: Register number (0-31)
+ * @andmsk: Bits to AND (clear bits where 0)
+ * @ormsk: Bits to OR (set bits where 1)
+ */
 static inline void pru_other_and_or_reg(uint16_t reg, uint32_t andmsk, uint32_t ormsk)
 {
-	reg <<= 2;	/* multiply by 4 */
+	reg <<= 2;
 	pru_other_halt();
 	PDBG_OTHER(reg) = (PDBG_OTHER(reg) & andmsk) | ormsk;
 	pru_other_resume();

@@ -1,14 +1,32 @@
-# Makefile for BeagleLogic PRU firmware
+################################################################################
+# Makefile for BeagleLogic PRUDAQ PRU1 Firmware Variants
+#
+# This makefile builds three variants of PRU1 firmware for PRUDAQ ADC capture:
+# 1. prudaq-ch0  - I-channel (in-phase) only
+# 2. prudaq-ch1  - Q-channel (quadrature) only
+# 3. prudaq-ch01 - Both I and Q channels interleaved
+#
+# Updated for pru-software-support-package v6.5+
 # Based on Makefile provided by TI examples
 #
-# PRU_CGT environment variable must point to the TI PRU code gen tools directory. E.g.:
-#(Desktop Linux) export PRU_CGT=/path/to/pru/code/gen/tools/ti-cgt-pru_2.1.2
-#(Windows) set PRU_CGT=C:/path/to/pru/code/gen/tools/ti-cgt-pru_2.1.2
-#(ARM Linux*) export PRU_CGT=/usr/share/ti/cgt-pru
+# Prerequisites:
+# 1. TI PRU Code Generation Tools must be installed
+# 2. PRU_CGT environment variable must be set to the installation path
+# 3. PRU Software Support Package must be installed (default: /usr/lib/ti/...)
 #
-# *ARM Linux also needs to create a symbolic link to the /usr/bin/ directory in
-# order to use the same Makefile
-#(ARM Linux) ln -s /usr/bin/ /usr/share/ti/cgt-pru/bin
+# Environment Variable Examples:
+#   (Desktop Linux) export PRU_CGT=/path/to/pru/code/gen/tools/ti-cgt-pru_2.1.2
+#   (Windows)       set PRU_CGT=C:/path/to/pru/code/gen/tools/ti-cgt-pru_2.1.2
+#   (ARM Linux)     export PRU_CGT=/usr/share/ti/cgt-pru
+#
+# Note for ARM Linux: Create a symbolic link to /usr/bin/ directory:
+#   ln -s /usr/bin/ /usr/share/ti/cgt-pru/bin
+#
+# Usage:
+#   make          - Build all three firmware variants
+#   make clean    - Remove build artifacts
+#   make deploy   - Install firmwares to /lib/firmware
+################################################################################
 
 ifndef PRU_CGT
 define ERROR_BODY
@@ -36,8 +54,11 @@ MKFILE_PATH := $(abspath $(lastword $(MAKEFILE_LIST)))
 CURRENT_DIR := $(notdir $(patsubst %/,%,$(dir $(MKFILE_PATH))))
 PROJ_NAME=$(CURRENT_DIR)
 
-LINKER_COMMAND_FILE=./AM335x_PRU.cmd
+# Updated for v6.5+: Use AM335x_PRU1.cmd (no .resource_table, no .pru_irq_map)
+# PRU1 doesn't need interrupt configuration
+LINKER_COMMAND_FILE=./AM335x_PRU1.cmd
 
+# Updated for v6.5+: No RPMsg library (not used)
 LIBS=
 
 INCLUDE=--include_path=$(PRU_SP_PATH)/include --include_path=$(PRU_SP_PATH)/include/am335x
@@ -73,6 +94,7 @@ printStart:
 	@echo ''
 	@echo '************************************************************'
 	@echo 'Building project: $(PROJ_NAME)'
+	@echo 'Using pru-software-support-package v6.5+ format'
 
 printEnd:
 	@echo ''
@@ -142,3 +164,4 @@ deploy: $(TARGETS)
 	@cp -v $(TARGET_CH1) /lib/firmware/beaglelogic-pru1-prudaq-ch1
 	@cp -v $(TARGET_CH01) /lib/firmware/beaglelogic-pru1-prudaq-ch01
 	@echo ''
+	

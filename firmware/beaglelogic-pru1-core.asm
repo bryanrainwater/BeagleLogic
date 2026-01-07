@@ -1,21 +1,41 @@
-;* PRU1 Firmware for BeagleLogic
+;*******************************************************************************
+;* PRU1 Core Assembly - BeagleLogic High-Speed GPIO Sampler
+;*
+;* This is the performance-critical component of BeagleLogic. PRU1 samples
+;* GPIO pins at up to 100 MHz and buffers the data in registers before
+;* transferring to PRU0 for DMA.
+;*
+;* Sampling modes supported:
+;* - 100 MHz, 16-bit (up to 14 channels on usable pins on BeagleBone Black)
+;* - 100 MHz, 8-bit (8 channels)
+;* - Configurable lower rates with DELAY macro (up to 100 MHz / divisor)
+;* - Test pattern generation for debugging
+;*
+;* Data flow:
+;* 1. Read GPIO pins via R31 (direct hardware access)
+;* 2. Store samples in registers R21-R28 (32 bytes)
+;* 3. Signal PRU0 via interrupt
+;* 4. Transfer data to PRU0 via scratchpad (XOUT instruction)
+;* 5. Repeat
 ;*
 ;* Copyright (C) 2014 Kumar Abhishek <abhishek@theembeddedkitchen.net>
-;*
-;* This file is a part of the BeagleLogic project
 ;*
 ;* This program is free software; you can redistribute it and/or modify
 ;* it under the terms of the GNU General Public License version 2 as
 ;* published by the Free Software Foundation.
+;*******************************************************************************
 
 	.include "beaglelogic-pru-defs.inc"
 
+;* NOP macro - Simple no-operation using ADD
 NOP	.macro
-	 ADD R0.b0, R0.b0, R0.b0
+	ADD R0.b0, R0.b0, R0.b0
 	.endm
 
-; Generic delay loop macro
-; Also includes a post-finish op
+;* DELAY macro - Software delay for lower sample rates
+;* Parameters:
+;*   Rx  - Register containing delay count (cycles - 2)
+;*   op  - Operation to execute after delay completes
 DELAY	.macro Rx, op
 	SUB	R0, Rx, 2
 	QBEQ	$E?, R0, 0
@@ -62,46 +82,55 @@ asm_main:
 	LDI    R29, 0
 	QBEQ   sampleincnumberstest, R14, 0
 	QBNE   samplexm, R14, 1
+	;=========================================================================
+	; 100 MHz Sampling Mode (samplediv = 1)
+	;=========================================================================
 sample100m:
-	QBEQ   sample100m8, R15, 1
+	QBEQ   sample100m8, R15, 1              ; Check sample unit (1=8-bit)
+
+	;-------------------------------------------------------------------------
+	; 100 MHz, 16-bit sampling (14 channels)
+	; Each MOV takes 1 cycle, NOP takes 1 cycle = 2 cycles per sample
+	; Sample rate = 200 MHz / 2 = 100 MHz
+	;-------------------------------------------------------------------------
 sample100m16:
-	MOV    R21.w0, R31.w0
+	MOV    R21.w0, R31.w0                   ; Sample 1 (16 bits)
 	NOP
-	MOV    R21.w2, R31.w0
+	MOV    R21.w2, R31.w0                   ; Sample 2
 	NOP
 $sample100m16$2:
-	MOV    R22.w0, R31.w0
+	MOV    R22.w0, R31.w0                   ; Sample 3
 	NOP
-	MOV    R22.w2, R31.w0
+	MOV    R22.w2, R31.w0                   ; Sample 4
 	NOP
-	MOV    R23.w0, R31.w0
+	MOV    R23.w0, R31.w0                   ; Sample 5
 	NOP
-	MOV    R23.w2, R31.w0
+	MOV    R23.w2, R31.w0                   ; Sample 6
 	NOP
-	MOV    R24.w0, R31.w0
+	MOV    R24.w0, R31.w0                   ; Sample 7
 	NOP
-	MOV    R24.w2, R31.w0
+	MOV    R24.w2, R31.w0                   ; Sample 8
 	NOP
-	MOV    R25.w0, R31.w0
+	MOV    R25.w0, R31.w0                   ; Sample 9
 	NOP
-	MOV    R25.w2, R31.w0
+	MOV    R25.w2, R31.w0                   ; Sample 10
 	NOP
-	MOV    R26.w0, R31.w0
+	MOV    R26.w0, R31.w0                   ; Sample 11
 	NOP
-	MOV    R26.w2, R31.w0
+	MOV    R26.w2, R31.w0                   ; Sample 12
 	NOP
-	MOV    R27.w0, R31.w0
+	MOV    R27.w0, R31.w0                   ; Sample 13
 	NOP
-	MOV    R27.w2, R31.w0
+	MOV    R27.w2, R31.w0                   ; Sample 14
 	NOP
-	MOV    R28.w0, R31.w0
-	ADD    R29, R29, 32                     ; Maintain global byte counter
-	MOV    R28.w2, R31.w0
-	XOUT   10, &R21, 36                     ; Move data across the broadside
-	MOV    R21.w0, R31.w0
-	LDI    R31, PRU1_PRU0_INTERRUPT + 16    ; Jab PRU0
+	MOV    R28.w0, R31.w0                   ; Sample 15
+	ADD    R29, R29, 32                     ; Update byte counter
+	MOV    R28.w2, R31.w0                   ; Sample 16 (final)
+	XOUT   10, &R21, 36                     ; Transfer 36 bytes to PRU0 scratchpad
+	MOV    R21.w0, R31.w0                   ; Start next batch
+	LDI    R31, PRU1_PRU0_INTERRUPT + 16    ; Signal PRU0 data ready
 	MOV    R21.w2, R31.w0
-	JMP    $sample100m16$2
+	JMP    $sample100m16$2                  ; Continue sampling
 
 sample100m8:
 	MOV    R21.b0, R31.b0
@@ -286,45 +315,49 @@ $samplexm8$2:
 	MOV    R21.b1, R31.b0
 	DELAY  R14, "JMP    $samplexm8$2"
 
-; Unit test to check for dropped frames
-; Runs at 100 MHz
+	;=========================================================================
+	; Test Pattern Mode (samplediv = 0)
+	; Generates incrementing numbers for debugging/testing
+	;=========================================================================
 sampleincnumberstest:
-	LDI    R21, 0
+	LDI    R21, 0                           ; Initialize counter
 	NOP
 	NOP
 	NOP
-$S1:	ADD    R22, R21, 1
+$S1:	ADD    R22, R21, 1                      ; R22 = R21 + 1
 	NOP
 	NOP
 	NOP
-	ADD    R23, R22, 1
+	ADD    R23, R22, 1                      ; R23 = R22 + 1
 	NOP
 	NOP
 	NOP
-	ADD    R24, R23, 1
+	ADD    R24, R23, 1                      ; R24 = R23 + 1
 	NOP
 	NOP
 	NOP
-	ADD    R25, R24, 1
+	ADD    R25, R24, 1                      ; R25 = R24 + 1
 	NOP
 	NOP
 	NOP
-	ADD    R26, R25, 1
+	ADD    R26, R25, 1                      ; R26 = R25 + 1
 	NOP
 	NOP
 	NOP
-	ADD    R27, R26, 1
+	ADD    R27, R26, 1                      ; R27 = R26 + 1
 	NOP
 	NOP
 	NOP
-	ADD    R28, R27, 1
-	XOUT   10, &R21, 36
-	LDI    R31, PRU1_PRU0_INTERRUPT + 16
+	ADD    R28, R27, 1                      ; R28 = R27 + 1
+	XOUT   10, &R21, 36                     ; Transfer to PRU0
+	LDI    R31, PRU1_PRU0_INTERRUPT + 16    ; Signal PRU0
 	NOP
-	ADD    R21, R28, 1
+	ADD    R21, R28, 1                      ; Continue sequence
 	NOP
 	NOP
-	JMP    $S1
+	JMP    $S1                              ; Loop forever
 
-; End-of-firmware
+	;=========================================================================
+	; End of firmware
+	;=========================================================================
 	HALT

@@ -1,10 +1,15 @@
 /****************************************************************************/
-/*  AM335x_PRU.cmd                                                          */
-/*  Copyright (c) 2015  Texas Instruments Incorporated                      */
+/*  AM335x_PRU1.cmd                                                         */
+/*  Copyright (c) 2015-2021  Texas Instruments Incorporated                 */
 /*                                                                          */
 /*    Description: This file is a linker command file that can be used for  */
-/*                 linking PRU programs built with the C compiler and       */
+/*                 linking PRU1 programs built with the C compiler and      */
 /*                 the resulting .out file on an AM335x device.             */
+/*                                                                          */
+/*    PRU1-specific: No .pru_irq_map or .resource_table sections           */
+/*    (PRU1 has no interrupt map and doesn't use RPMsg)                    */
+/*                                                                          */
+/*    Used for: BeagleLogic PRUDAQ firmware variants                       */
 /****************************************************************************/
 
 -cr								/* Link using C conventions */
@@ -82,5 +87,8 @@ SECTIONS {
 	.farbss		>  PRU_DMEM_0_1, PAGE 1
 	.fardata	>  PRU_DMEM_0_1, PAGE 1
 
-	.resource_table > PRU_DMEM_0_1, PAGE 1
+	/* 
+	 * No .pru_irq_map section for PRU1 - it doesn't configure interrupts
+	 * No .resource_table section for v6.5+ - not using RPMsg
+	 */
 }

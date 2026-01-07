@@ -1,25 +1,47 @@
-;* PRU1 Firmware for BeagleLogic (customized for PRUDAQ)
+;*******************************************************************************
+;* PRU1 Firmware for BeagleLogic (PRUDAQ variant - I+Q channels interleaved)
 ;*
 ;* Copyright (C) 2014 Kumar Abhishek <abhishek@theembeddedkitchen.net>
-;*
 ;* Mar '16: Modified by Kumar Abhishek for supporting the PRUDAQ board
 ;* Adapted by Jason Holt to follow an external clock signal
 ;*
-;* This modified firmware captures interleaved channels A & B into
-;* /dev/beaglelogic
+;* This firmware variant captures both I-channel (in-phase) and Q-channel
+;* (quadrature) from the AD9201 ADC, interleaved in the output stream.
+;*
+;* Hardware Details:
+;* - AD9201: 10-bit, 20 MSPS ADC
+;* - Clock Input: R31.16 (external clock, edge-triggered sampling)
+;* - Data Input: R31.w0 (10-bit, upper bits masked to 0x03FF)
+;* - Output: 8 I/Q pairs per transfer (I0, Q0, I1, Q1, ... I7, Q7 = 32 bytes)
+;*
+;* Sampling Pattern:
+;* - Falling edge: Sample I-channel
+;* - Rising edge: Sample Q-channel
+;* - Interleaved storage: [I0, Q0, I1, Q1, I2, Q2, ... I7, Q7]
+;*
+;* This provides synchronized I/Q capture suitable for software-defined radio
+;* and other applications requiring in-phase/quadrature data.
 ;*
 ;* This program is free software; you can redistribute it and/or modify
 ;* it under the terms of the GNU General Public License version 2 as
 ;* published by the Free Software Foundation.
+;*******************************************************************************
 
 	.include "beaglelogic-pru-defs.inc"
 
+;*******************************************************************************
+;* Macro Definitions
+;*******************************************************************************
+
+;* NOP macro - Simple no-operation using harmless ADD
 NOP	.macro
 	 ADD R0.b0, R0.b0, R0.b0
 	.endm
 
-; Generic delay loop macro
-; Also includes a post-finish op
+;* DELAY macro - Software delay loop (unused in PRUDAQ - clock-driven sampling)
+;* Parameters:
+;*   Rx  - Register containing delay count (cycles - 2)
+;*   op  - Operation to execute after delay completes
 DELAY	.macro Rx, op
 	SUB	R0, Rx, 2
 	QBEQ	$E?, R0, 0
@@ -68,106 +90,123 @@ asm_main:
 	LDI    R20.w2, 0x03FF
 
 sampleAD9201:
-	; Changed code for AD9201 sampling
-	WBC    R31, 11                       ; Wait for falling edge
+	;=========================================================================
+	; AD9201 Dual-Channel (I+Q) Interleaved Sampling Loop
+	;
+	; This loop captures both I and Q channels from the AD9201 ADC in an
+	; interleaved pattern. Each clock cycle produces both an I and Q sample,
+	; which are stored sequentially: [I0, Q0, I1, Q1, I2, Q2, ...]
+	;
+	; Sampling Pattern Per Clock Cycle:
+	; 1. Wait for rising edge -> Sample I-channel (in-phase)
+	; 2. Wait for falling edge -> Sample Q-channel (quadrature)
+	; 3. Store both samples consecutively in register buffer
+	;
+	; Output Format (8 I/Q pairs = 32 bytes):
+	; R21: [I0, Q0]  R22: [I1, Q1]  R23: [I2, Q2]  R24: [I3, Q3]
+	; R25: [I4, Q4]  R26: [I5, Q5]  R27: [I6, Q6]  R28: [I7, Q7]
+	;
+	; This interleaved format is ideal for SDR applications and direct
+	; complex number processing (I=real, Q=imaginary).
+	;=========================================================================
+	WBC    R31, 16                       ; Wait for falling edge
 
-	WBS    R31, 11                       ; Wait for rising edge
+	WBS    R31, 16                       ; Wait for rising edge
 	NOP                                  ; 3 cycles ~15ns delay before readout
 	NOP
 	NOP
 	MOV    R21.w0, R31.w0                ; Read I0
-	WBC    R31, 11                       ; falling edge
+	WBC    R31, 16                       ; falling edge
 	NOP
-$sampleAD9201$2:
 	NOP
 	NOP
 	MOV    R21.w2, R31.w0                ; Read Q0
 
-	WBS    R31, 11
+	WBS    R31, 16
 	AND    R21, R21, R20                 ; Mask unused bits
 	NOP
 	NOP
 
 	MOV    R22.w0, R31.w0                ; I1
-	WBC    R31, 11
+	WBC    R31, 16
 	NOP
 	NOP
 	NOP
 	MOV    R22.w2, R31.w0                ; Q1
 
-	WBS    R31, 11
+	WBS    R31, 16
 	AND    R22, R22, R20
 	NOP
 	NOP
 	MOV    R23.w0, R31.w0                ; I2
-	WBC    R31, 11
+	WBC    R31, 16
 	NOP
 	NOP
 	NOP
 	MOV    R23.w2, R31.w0                ; Q2
 
-	WBS    R31, 11
+	WBS    R31, 16
 	AND    R23, R23, R20
 	NOP
 	NOP
 	MOV    R24.w0, R31.w0                ; I3
-	WBC    R31, 11
+	WBC    R31, 16
 	NOP
 	NOP
 	NOP
 	MOV    R24.w2, R31.w0                ; Q3
 
-	WBS    R31, 11
+	WBS    R31, 16
 	AND    R24, R24, R20
 	NOP
 	NOP
 	MOV    R25.w0, R31.w0                ; I4
-	WBC    R31, 11
+	WBC    R31, 16
 	NOP
 	NOP
 	NOP
 	MOV    R25.w2, R31.w0                ; Q4
 
-	WBS    R31, 11
+	WBS    R31, 16
 	AND    R25, R25, R20
 	NOP
 	NOP
 	MOV    R26.w0, R31.w0                ; I5
-	WBC    R31, 11
+	WBC    R31, 16
 	NOP
 	NOP
 	NOP
 	MOV    R26.w2, R31.w0                ; Q5
 
-	WBS    R31, 11
+	WBS    R31, 16
 	AND    R26, R26, R20
 	NOP
 	NOP
 	MOV    R27.w0, R31.w0                ; I6
-	WBC    R31, 11
+	WBC    R31, 16
 	NOP
 	NOP
 	NOP
 	MOV    R27.w2, R31.w0                ; Q6
 
-	WBS    R31, 11
+	WBS    R31, 16
 	AND    R27, R27, R20
 	NOP
 	NOP
 	MOV    R28.w0, R31.w0                ; I7
-	WBC    R31, 11
+	WBC    R31, 16
 	NOP
 	NOP
 	ADD    R29, R29, 32                  ; Maintain global byte counter
 	MOV    R28.w2, R31.w0                ; Q7
 
-	WBS    R31, 11
+	WBS    R31, 16
 	AND    R28, R28, R20
 	XOUT   10, &R21, 36                     ; Move data across the broadside
 	LDI    R31, PRU1_PRU0_INTERRUPT + 16    ; Jab PRU0
 	MOV    R21.w0, R31.w0
-	WBC    R31, 11
-	JMP    $sampleAD9201$2
+	WBC    R31, 16
+	JMP    sampleAD9201
 
 ; End-of-firmware
 	HALT

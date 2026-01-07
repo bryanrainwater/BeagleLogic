@@ -1,42 +1,73 @@
-;
-; Assembler Includes for both the PRUs
-;
+;*******************************************************************************
+;* @file beaglelogic-pru-defs.inc (PRUDAQ variant)
+;* @brief Assembly constant definitions for BeagleLogic PRUDAQ firmware
+;*
+;* This file defines constants, register aliases, and memory addresses used
+;* by PRUDAQ PRU1 assembly code. It is a simplified version of the main
+;* beaglelogic-pru-defs.inc with only the definitions needed for ADC sampling.
+;*
+;* Note: This is identical to the main BeagleLogic definitions - PRUDAQ variants
+;* use the same interrupt and register structure as standard BeagleLogic.
+;*******************************************************************************
 
+	;=========================================================================
+	;* Constant Table Pointer Aliases
 	;*
-	;* Constants
+	;* The PRU provides constant table pointers (C0-C31) for efficient access
+	;* to various memory regions and peripherals.
+	;=========================================================================
+
+	.asg C0, CONST_PRUSSINTC       ; PRU interrupt controller
+	.asg C4, CONST_PRUCFG          ; PRU configuration registers
+	.asg C24, PRUDRAM              ; PRU data RAM
+	.asg C31, CONST_DDR            ; External DDR memory
+
+	;=========================================================================
+	;* PRU Interrupt Controller Register Offsets
+	;=========================================================================
+
+	.asg 0x10, GER_OFFSET          ; Global Enable Register
+	.asg 0x24, SICR_OFFSET         ; System Interrupt Status Clear Register
+	.asg 0x28, EISR_OFFSET         ; Enable Interrupt Set Register
+	.asg 0x34, HIESR_OFFSET        ; Host Interrupt Enable Set Register
+
+	;=========================================================================
+	;* Memory Addresses
+	;=========================================================================
+
+	.asg 0x02000, CONST_OTHERPRU_MEM    ; Other PRU's data RAM base
+	.asg 0x10000, CONST_SHARED_MEM      ; Shared memory base address
+
+	;=========================================================================
+	;* System Event Numbers for Interrupts
 	;*
+	;* PRUDAQ uses the same interrupt scheme as standard BeagleLogic:
+	;* - PRU1 signals PRU0 via PRU1_PRU0_INTERRUPT (event 20)
+	;* - PRU0 signals ARM via PRU0_ARM_INTERRUPT_A/B (events 22/24)
+	;=========================================================================
 
-	.asg C0, CONST_PRUSSINTC
-	.asg C4, CONST_PRUCFG
-	.asg C24, PRUDRAM
-	.asg C31, CONST_DDR
+	.asg 16, PRU0_ARM_INTERRUPT         ; PRU0 -> ARM (general)
+	.asg 17, ARM_PRU0_INTERRUPT         ; ARM -> PRU0 (general)
+	.asg 18, PRU1_ARM_INTERRUPT         ; PRU1 -> ARM (general)
+	.asg 19, ARM_PRU1_INTERRUPT         ; ARM -> PRU1 (general)
+	.asg 20, PRU1_PRU0_INTERRUPT        ; PRU1 -> PRU0 (data ready)
+	.asg 21, PRU0_PRU1_INTERRUPT        ; PRU0 -> PRU1
+	.asg 22, PRU0_ARM_INTERRUPT_A       ; PRU0 -> ARM (buffer ready)
+	.asg 24, PRU0_ARM_INTERRUPT_B       ; PRU0 -> ARM (capture complete)
 
-	.asg 0x10, GER_OFFSET
-	.asg 0x24, SICR_OFFSET
-	.asg 0x28, EISR_OFFSET
-	.asg 0x34, HIESR_OFFSET
+	;=========================================================================
+	;* PRU Control Register Addresses
+	;=========================================================================
 
-	.asg 0x02000, CONST_OTHERPRU_MEM
-	.asg 0x10000, CONST_SHARED_MEM
+	.asg 0x22028, CTPPR_0               ; Constant Table Pointer Register 0
 
-	;* IRQ numbers
-	.asg 16, PRU0_ARM_INTERRUPT
-	.asg 17, ARM_PRU0_INTERRUPT
-	.asg 18, PRU1_ARM_INTERRUPT
-	.asg 19, ARM_PRU1_INTERRUPT
-	.asg 20, PRU1_PRU0_INTERRUPT
-	.asg 21, PRU0_PRU1_INTERRUPT
-	.asg 22, PRU0_ARM_INTERRUPT_A
-	.asg 24, PRU0_ARM_INTERRUPT_B
-
-	.asg 0x22028, CTPPR_0
-	; Address for the PRUSS_PRU_CTRL registers
-	; CONTROL                 0x22000
-	; STATUS                  0x22004
-	; WAKEUP_EN               0x22008
-	; CYCLE                   0x2200C
-	; STALL                   0x22010
-	; CTBIR_0                 0x22020
-	; CTBIR_1                 0x22024
-	; CTPPR_0                 0x22028
-	; CTPPR_1                 0x2202C
+	; PRU Control Register Map (Base: 0x22000 for PRU0, 0x24000 for PRU1)
+	; CONTROL         0x22000     - Control register (enable, reset, etc.)
+	; STATUS          0x22004     - Status register (run state, etc.)
+	; WAKEUP_EN       0x22008     - Wakeup enable register
+	; CYCLE           0x2200C     - Cycle counter
+	; STALL           0x22010     - Stall counter
+	; CTBIR_0         0x22020     - Constant Table Block Index Register 0
+	; CTBIR_1         0x22024     - Constant Table Block Index Register 1
+	; CTPPR_0         0x22028     - Constant Table Pointer Register 0
+	; CTPPR_1         0x2202C     - Constant Table Pointer Register 1

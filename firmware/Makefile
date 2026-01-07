@@ -1,14 +1,32 @@
-# Makefile for BeagleLogic PRU firmware
-# Based on Makefile provided by TI examples
+################################################################################
+# Makefile for BeagleLogic PRU Firmware
 #
-# PRU_CGT environment variable must point to the TI PRU code gen tools directory. E.g.:
-#(Desktop Linux) export PRU_CGT=/path/to/pru/code/gen/tools/ti-cgt-pru_2.1.2
-#(Windows) set PRU_CGT=C:/path/to/pru/code/gen/tools/ti-cgt-pru_2.1.2
-#(ARM Linux*) export PRU_CGT=/usr/share/ti/cgt-pru
+# This makefile builds both PRU0 and PRU1 firmware for the BeagleLogic logic
+# analyzer using the TI PRU C/C++ compiler and assembler.
 #
-# *ARM Linux also needs to create a symbolic link to the /usr/bin/ directory in
-# order to use the same Makefile
-#(ARM Linux) ln -s /usr/bin/ /usr/share/ti/cgt-pru/bin
+# Updated for pru-software-support-package v6.5+ which removed RPMsg dependency
+# and changed the interrupt mapping structure.
+#
+# Based on Makefile provided by TI examples.
+#
+# Prerequisites:
+# 1. TI PRU Code Generation Tools must be installed
+# 2. PRU_CGT environment variable must be set to the installation path
+# 3. PRU Software Support Package must be installed (default: /usr/lib/ti/...)
+#
+# Environment Variable Examples:
+#   (Desktop Linux) export PRU_CGT=/path/to/pru/code/gen/tools/ti-cgt-pru_2.1.2
+#   (Windows)       set PRU_CGT=C:/path/to/pru/code/gen/tools/ti-cgt-pru_2.1.2
+#   (ARM Linux)     export PRU_CGT=/usr/share/ti/cgt-pru
+#
+# Note for ARM Linux: Create a symbolic link to /usr/bin/ directory:
+#   ln -s /usr/bin/ /usr/share/ti/cgt-pru/bin
+#
+# Usage:
+#   make          - Build both PRU firmwares
+#   make clean    - Remove build artifacts
+#   make deploy   - Install firmwares to /lib/firmware
+################################################################################
 
 ifndef PRU_CGT
 define ERROR_BODY
@@ -36,9 +54,15 @@ MKFILE_PATH := $(abspath $(lastword $(MAKEFILE_LIST)))
 CURRENT_DIR := $(notdir $(patsubst %/,%,$(dir $(MKFILE_PATH))))
 PROJ_NAME=$(CURRENT_DIR)
 
-LINKER_COMMAND_FILE=./AM335x_PRU.cmd
+# Linker command files: Separate files for each PRU
+# PRU0 includes .pru_irq_map section for interrupt configuration
+# PRU1 doesn't need interrupt mapping (only signals to PRU0)
+LINKER_COMMAND_FILE_PRU0=./AM335x_PRU.cmd
+LINKER_COMMAND_FILE_PRU1=./AM335x_PRU1.cmd
 
-LIBS=--library=$(PRU_SP_PATH)/lib/rpmsg_lib.lib
+# Libraries: RPMsg removed in v6.5+ (BeagleLogic doesn't use RPMsg)
+# Only standard C library is linked
+LIBS=
 
 INCLUDE=--include_path=$(PRU_SP_PATH)/include --include_path=$(PRU_SP_PATH)/include/am335x
 
@@ -72,6 +96,7 @@ printStart:
 	@echo ''
 	@echo '************************************************************'
 	@echo 'Building project: $(PROJ_NAME)'
+	@echo 'Using pru-software-support-package v6.5+ format'
 
 printEnd:
 	@echo ''
@@ -82,18 +107,18 @@ printEnd:
 	@echo ''
 
 # Invokes the linker (-z flag) to make the .out file
-$(TARGET_PRU0): $(OBJECTS_PRU0) $(LINKER_COMMAND_FILE)
+$(TARGET_PRU0): $(OBJECTS_PRU0) $(LINKER_COMMAND_FILE_PRU0)
 	@echo ''
 	@echo 'Building target: $@'
 	@echo 'Invoking: PRU Linker'
-	$(PRU_CGT)/bin/clpru $(CFLAGS) -z -i$(PRU_CGT)/lib -i$(PRU_CGT)/include $(LFLAGS) -o $(TARGET_PRU0) $(OBJECTS_PRU0) -m$(MAP) $(LINKER_COMMAND_FILE) --library=libc.a $(LIBS)
+	$(PRU_CGT)/bin/clpru $(CFLAGS) -z -i$(PRU_CGT)/lib -i$(PRU_CGT)/include $(LFLAGS) -o $(TARGET_PRU0) $(OBJECTS_PRU0) -m$(MAP) $(LINKER_COMMAND_FILE_PRU0) --library=libc.a $(LIBS)
 	@echo 'Finished building target: $@'
 
-$(TARGET_PRU1): $(OBJECTS_PRU1) $(LINKER_COMMAND_FILE)
+$(TARGET_PRU1): $(OBJECTS_PRU1) $(LINKER_COMMAND_FILE_PRU1)
 	@echo ''
 	@echo 'Building target: $@'
 	@echo 'Invoking: PRU Linker'
-	$(PRU_CGT)/bin/clpru $(CFLAGS) -z -i$(PRU_CGT)/lib -i$(PRU_CGT)/include $(LFLAGS) -o $(TARGET_PRU1) $(OBJECTS_PRU1) -m$(MAP) $(LINKER_COMMAND_FILE) --library=libc.a $(LIBS)
+	$(PRU_CGT)/bin/clpru $(CFLAGS) -z -i$(PRU_CGT)/lib -i$(PRU_CGT)/include $(LFLAGS) -o $(TARGET_PRU1) $(OBJECTS_PRU1) -m$(MAP) $(LINKER_COMMAND_FILE_PRU1) --library=libc.a $(LIBS)
 	@echo 'Finished building target: $@'
 
 # Invokes the compiler on all c files in the directory to create the object files
@@ -147,3 +172,4 @@ deploy-pru1: $(TARGET_PRU1)
 	@echo 'Symlinking beaglelogic-pru1-logic to beaglelogic-pru1-fw'
 	@ln -sfv /lib/firmware/beaglelogic-pru1-logic /lib/firmware/beaglelogic-pru1-fw
 	@echo ''
+	

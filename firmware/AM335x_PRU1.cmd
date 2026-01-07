@@ -1,55 +1,50 @@
 /****************************************************************************/
-/*  AM335x_PRU.cmd - Linker Command File for PRU0 BeagleLogic Firmware     */
-/*  Copyright (c) 2015  Texas Instruments Incorporated                      */
+/*  AM335x_PRU1.cmd - Linker Command File for PRU1 BeagleLogic Firmware    */
+/*  Copyright (c) 2015-2021  Texas Instruments Incorporated                 */
 /*                                                                          */
 /*  Description:                                                            */
 /*  This linker script defines the memory map and section placement for    */
-/*  PRU0 firmware running on AM335x (BeagleBone) processors.               */
+/*  PRU1 firmware running on AM335x (BeagleBone) processors.               */
 /*                                                                          */
-/*  Key Features:                                                           */
-/*  - Maps code to 8kB PRU instruction RAM (PRU_IMEM)                      */
-/*  - Maps data/stack/heap to 8kB PRU data RAM (PRU_DMEM)                  */
-/*  - Provides access to shared memory and system peripherals              */
-/*  - Includes .pru_irq_map section for v6.5+ interrupt configuration      */
+/*  Key Differences from PRU0 linker script:                               */
+/*  - No .pru_irq_map section (PRU1 doesn't configure interrupt routing)   */
+/*  - PRU1 only sends interrupts, doesn't receive or route them            */
+/*  - Memory map is otherwise identical to PRU0                            */
 /*                                                                          */
-/*  Updated for pru-software-support-package v6.5+:                        */
-/*  - Removed .resource_table section (deprecated in v6.5+)                */
-/*  - Added .pru_irq_map section for interrupt configuration               */
-/*  - Interrupt mapping now handled via device tree + .pru_irq_map         */
+/*  In BeagleLogic architecture:                                           */
+/*  - PRU1 performs high-speed GPIO sampling                               */
+/*  - PRU1 signals PRU0 when data is ready (via scratchpad + interrupt)    */
+/*  - PRU0 handles all interrupt routing and ARM communication             */
 /****************************************************************************/
 
 -cr								/* Link using C conventions */
 
 /*==========================================================================*/
-/* Memory Map for AM335x PRU Subsystem                                     */
+/* Memory Map for AM335x PRU Subsystem (PRU1)                              */
 /*                                                                          */
-/* The AM335x provides multiple memory regions accessible to the PRU:      */
-/* - PRU local instruction and data RAM (fast, 8kB each)                   */
-/* - Shared RAM between PRU0 and PRU1 (12kB)                               */
-/* - System memory (DDR, OCMC) via L3 interconnect                         */
-/* - Memory-mapped peripheral registers                                    */
-/*                                                                          */
-/* CREGISTER values define constant table entries (C0-C31) used by the     */
-/* PRU for efficient addressing of these memory regions.                   */
+/* Note: PRU1 uses its own instruction RAM at 0x00000000 (physical         */
+/* 0x34000 in PRU-ICSS address space) and its own data RAM. However, the   */
+/* linker script uses local addressing (0x00000000) which is remapped by   */
+/* the PRU subsystem hardware.                                             */
 /*==========================================================================*/
 MEMORY
 {
       PAGE 0:  /* Instruction memory page */
-	PRU_IMEM		: org = 0x00000000 len = 0x00002000  /* 8kB PRU0 Instruction RAM */
+	PRU_IMEM		: org = 0x00000000 len = 0x00002000  /* 8kB PRU1 Instruction RAM */
 
       PAGE 1:  /* Data memory page */
 
 	/* ===== PRU Local and Shared RAM ===== */
 
-	PRU_DMEM_0_1	: org = 0x00000000 len = 0x00002000 CREGISTER=24 /* 8kB PRU0 Data RAM (local) */
-	PRU_DMEM_1_0	: org = 0x00002000 len = 0x00002000	CREGISTER=25 /* 8kB PRU1 Data RAM (peer access) */
+	PRU_DMEM_0_1	: org = 0x00000000 len = 0x00002000 CREGISTER=24 /* 8kB PRU1 Data RAM (local) */
+	PRU_DMEM_1_0	: org = 0x00002000 len = 0x00002000	CREGISTER=25 /* 8kB PRU0 Data RAM (peer access) */
 
 	  PAGE 2:  /* Shared and external memory */
 	PRU_SHAREDMEM	: org = 0x00010000 len = 0x00003000 CREGISTER=28 /* 12kB Shared RAM (PRU0/PRU1/ARM) */
 
 	/* ===== System Memory (External to PRU Subsystem) ===== */
 
-	DDR			    : org = 0x80000000 len = 0x00000100	CREGISTER=31 /* DDR RAM (main system memory) */
+	DDR			    : org = 0x80000000 len = 0x00010000	CREGISTER=31 /* DDR RAM (main system memory) */
 	L3OCMC			: org = 0x40000000 len = 0x00010000	CREGISTER=30 /* On-Chip Memory Controller (64kB SRAM) */
 
 
@@ -92,12 +87,16 @@ MEMORY
 }
 
 /*==========================================================================*/
-/* Section Allocation                                                       */
+/* Section Allocation (PRU1-specific)                                      */
 /*                                                                          */
 /* This section maps compiler-generated sections to physical memory:       */
 /* - Code sections (.text) go to instruction RAM (PAGE 0)                  */
 /* - Data sections (.data, .bss, etc.) go to data RAM (PAGE 1)             */
-/* - Special sections like .pru_irq_map for interrupt configuration        */
+/*                                                                          */
+/* Important: PRU1 does NOT include a .pru_irq_map section because it      */
+/* does not configure interrupt routing. In the BeagleLogic architecture,  */
+/* PRU1 only sends interrupts (to PRU0), while PRU0 handles all interrupt  */
+/* routing and mapping to ARM host interrupts.                             */
 /*==========================================================================*/
 SECTIONS {
 	/* Forces _c_int00 (C initialization) to the start of PRU IRAM.
@@ -108,7 +107,7 @@ SECTIONS {
 	/* ===== Code Sections ===== */
 	.text		>  PRU_IMEM, PAGE 0        /* Executable code and assembly */
 
-	/* ===== Data Sections (all in local PRU0 data RAM) ===== */
+	/* ===== Data Sections (all in local PRU1 data RAM) ===== */
 	.stack		>  PRU_DMEM_0_1, PAGE 1    /* Runtime stack */
 	.bss		>  PRU_DMEM_0_1, PAGE 1    /* Uninitialized global/static variables */
 	.cio		>  PRU_DMEM_0_1, PAGE 1    /* C I/O buffer (printf, etc.) */
@@ -121,16 +120,6 @@ SECTIONS {
 	.farbss		>  PRU_DMEM_0_1, PAGE 1    /* Far BSS (uninitialized far data) */
 	.fardata	>  PRU_DMEM_0_1, PAGE 1    /* Far data (initialized far data) */
 
-	/* ===== PRU Interrupt Map (v6.5+ only) ===== */
-	/* This section replaces the .resource_table used in older versions.
-	   The .pru_irq_map section contains interrupt routing configuration
-	   that is parsed by the PRU remoteproc driver at firmware load time.
-
-	   COPY attribute ensures this section is copied to the output file
-	   even though it's not loaded into PRU memory. The kernel driver
-	   reads it directly from the ELF file. */
-	.pru_irq_map (COPY) :
-	{
-		*(.pru_irq_map)
-	}
+	/* No .pru_irq_map section for PRU1 - it doesn't configure interrupts.
+	   Only PRU0 needs .pru_irq_map to define interrupt routing tables. */
 }
