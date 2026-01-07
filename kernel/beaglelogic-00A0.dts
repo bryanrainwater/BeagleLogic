@@ -1,6 +1,39 @@
 /*
- * This file is a part of the BeagleLogic project
+ * Device Tree Overlay for BeagleLogic
+ * Updated for Linux kernel 6.x / pru-software-support-package v6.5+
+ *
+ * This overlay configures the BeagleBone's PRU subsystem and GPIO pins for
+ * high-speed logic analysis. It reconfigures LCD pins for PRU input mode,
+ * enables the PRUSS, and creates the BeagleLogic device node.
+ *
+ * Overlay Structure:
+ * - &ocp section: Disables conflicting default pin configurations
+ * - Fragment 0: Reconfigures pins to PRU1 input mode (MUX_MODE6)
+ * - Fragment 1: Enables PRUSS and applies pin configuration
+ * - Fragments 2-4: Optional PWM on P9_31 for PRUDAQ clock generation
+ * - Fragment 5: Creates BeagleLogic device with default settings
+ *
+ * Supported Modes:
+ * - 8-bit:  PRU1 R31 bits 0-7   (P8_45, P8_46, P8_43, P8_44, P8_41, P8_42, P8_39, P8_40)
+ * - 12-bit: PRU1 R31 bits 0-11  (adds P8_27, P8_29, P8_28, P8_30)
+ * - 14-bit: PRU1 R31 bits 0-13  (adds P8_20, P8_21 - requires eMMC disabled, see Fragment 0)
+ * - PRUDAQ: Uses P9_26 (R31 bit 16) for external ADC clock input
+ *
+ * Installation:
+ * 1. Compile: make overlay
+ * 2. Install: make deploy_overlay
+ *
+ * Original work:
  * Copyright (C) 2017 Kumar Abhishek <abhishek@theembeddedkitchen.net>
+ *
+ * Kernel 6.x updates:
+ * Copyright (C) 2024-2026 Bryan Rainwater
+ *
+ * Changes for kernel 6.x:
+ * - Stop mechanism changed from Event 23 interrupt to stop_flag memory write
+ * - Updated interrupt configuration comments to reflect kernel 6.x limitations
+ * - Added comprehensive pin mapping documentation
+ * - Added 14-bit expansion guidance (P8_20, P8_21)
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -9,6 +42,55 @@
 /dts-v1/;
 /plugin/;
 
+// Note you MUST pre-process with c with any includes
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/pinctrl/am33xx.h>
+#include <dt-bindings/interrupt-controller/irq.h>
+
+/*
+ * Disable default cape-universal pinmux configurations
+ *
+ * Important: This does NOT disable hardware peripherals like eMMC!
+ * It only disables the default/universal cape pin configurations to prevent
+ * conflicts with this overlay. Hardware peripherals (eMMC, HDMI) are configured
+ * separately by the main device tree and bootloader.
+ *
+ * PRU1 R31 Input Bit Mapping (MUX_MODE6):
+ * - Bits 0-7:   P8_45, P8_46, P8_43, P8_44, P8_41, P8_42, P8_39, P8_40 (LCD_DATA0-7)
+ * - Bits 8-11:  P8_27, P8_29, P8_28, P8_30 (LCD_VSYNC, LCD_HSYNC, LCD_PCLK, LCD_AC_BIAS_EN)
+ * - Bits 12-13: P8_20, P8_21 (GPMC_CSN3, GPMC_CSN2) - conflict with eMMC, NOT enabled by default
+ * - Bit 16:     P9_26 (UART1_RXD) - PRUDAQ external clock input
+ *
+ * Note: P9_31 (MCASP0_ACLKX) is NOT a PRU1 input.
+ * For PRUDAQ clock generation, P9_31 is configured as ehrpwm0A (mode 1) in Fragments 2-4.
+ */
+&ocp {
+	/* 14-bit expansion pins (bits 12-13) - Reserved, NOT USED by default */
+	P8_20_pinmux { status = "disabled"; };  /* PRU1 R31 bit 12 - conflicts with eMMC (mmc1_cmd) */
+	P8_21_pinmux { status = "disabled"; };  /* PRU1 R31 bit 13 - conflicts with eMMC (mmc1_clk) */
+
+	/* 12-bit mode pins (bits 8-11) */
+	P8_27_pinmux { status = "disabled"; };  /* PRU1 R31 bit 8 */
+	P8_28_pinmux { status = "disabled"; };  /* PRU1 R31 bit 10 */
+	P8_29_pinmux { status = "disabled"; };  /* PRU1 R31 bit 9 */
+	P8_30_pinmux { status = "disabled"; };  /* PRU1 R31 bit 11 */
+
+	/* PRUDAQ / Special purpose pins */
+	P9_26_pinmux { status = "disabled"; };  /* PRU1 R31 bit 16 - PRUDAQ external clock input */
+	P9_31_pinmux { status = "disabled"; };  /* Optional PWM output (ehrpwm0A) for PRUDAQ clock generation */
+
+	/* 8-bit mode pins (bits 0-7) */
+	P8_39_pinmux { status = "disabled"; };  /* PRU1 R31 bit 6 */
+	P8_40_pinmux { status = "disabled"; };  /* PRU1 R31 bit 7 */
+	P8_41_pinmux { status = "disabled"; };  /* PRU1 R31 bit 4 */
+	P8_42_pinmux { status = "disabled"; };  /* PRU1 R31 bit 5 */
+	P8_43_pinmux { status = "disabled"; };  /* PRU1 R31 bit 2 */
+	P8_44_pinmux { status = "disabled"; };  /* PRU1 R31 bit 3 */
+	P8_45_pinmux { status = "disabled"; };  /* PRU1 R31 bit 0 */
+	P8_46_pinmux { status = "disabled"; };  /* PRU1 R31 bit 1 */
+};
+
+
 / {
 	compatible = "ti,beaglebone", "ti,beaglebone-black", "ti,beaglebone-green";
 
@@ -16,19 +98,183 @@
 	part-number = "BEAGLELOGIC";
 	version = "00A0";
 
+	/*
+	 * Fragment 0: Pin Multiplexer Configuration
+	 *
+	 * Reconfigures AM335x pins from their default functions (LCD, UART, etc.) to
+	 * PRU1 input mode (MUX_MODE6). This allows the PRU to directly sample GPIO.
+	 *
+	 * PRU1 R31 Input Bit Mapping:
+	 * - Bits 0-7:   P8_45, P8_46, P8_43, P8_44, P8_41, P8_42, P8_39, P8_40
+	 * - Bits 8-11:  P8_27, P8_29, P8_28, P8_30
+	 * - Bits 12-13: P8_20, P8_21 (optional, conflict with eMMC)
+	 * - Bit 16:     P9_26 (PRUDAQ external clock input)
+	 *
+	 * Configuration:
+	 * - PIN_INPUT_PULLDOWN: Configures as input with pull-down
+	 * - MUX_MODE6: Selects PRU mode (pr1_pru1_pru_r31_x)
+	 */
 	fragment@0 {
+		target = <&am33xx_pinmux>;
+		__overlay__ {
+			beaglelogic_pins: pinmux_beaglelogic_pins {
+				pinctrl-single,pins = <
+					/* 8-bit mode (PRU1 R31 bits 0-7) - Always enabled */
+					AM33XX_PADCONF(AM335X_PIN_LCD_DATA0, PIN_INPUT_PULLDOWN, MUX_MODE6)      /* P8_45 - R31 bit 0 */
+					AM33XX_PADCONF(AM335X_PIN_LCD_DATA1, PIN_INPUT_PULLDOWN, MUX_MODE6)      /* P8_46 - R31 bit 1 */
+					AM33XX_PADCONF(AM335X_PIN_LCD_DATA2, PIN_INPUT_PULLDOWN, MUX_MODE6)      /* P8_43 - R31 bit 2 */
+					AM33XX_PADCONF(AM335X_PIN_LCD_DATA3, PIN_INPUT_PULLDOWN, MUX_MODE6)      /* P8_44 - R31 bit 3 */
+					AM33XX_PADCONF(AM335X_PIN_LCD_DATA4, PIN_INPUT_PULLDOWN, MUX_MODE6)      /* P8_41 - R31 bit 4 */
+					AM33XX_PADCONF(AM335X_PIN_LCD_DATA5, PIN_INPUT_PULLDOWN, MUX_MODE6)      /* P8_42 - R31 bit 5 */
+					AM33XX_PADCONF(AM335X_PIN_LCD_DATA6, PIN_INPUT_PULLDOWN, MUX_MODE6)      /* P8_39 - R31 bit 6 */
+					AM33XX_PADCONF(AM335X_PIN_LCD_DATA7, PIN_INPUT_PULLDOWN, MUX_MODE6)      /* P8_40 - R31 bit 7 */
+
+					/* 12-bit mode (PRU1 R31 bits 8-11) */
+					AM33XX_PADCONF(AM335X_PIN_LCD_VSYNC, PIN_INPUT_PULLDOWN, MUX_MODE6)      /* P8_27 - R31 bit 8 */
+					AM33XX_PADCONF(AM335X_PIN_LCD_HSYNC, PIN_INPUT_PULLDOWN, MUX_MODE6)      /* P8_29 - R31 bit 9 */
+					AM33XX_PADCONF(AM335X_PIN_LCD_PCLK, PIN_INPUT_PULLDOWN, MUX_MODE6)       /* P8_28 - R31 bit 10 */
+					AM33XX_PADCONF(AM335X_PIN_LCD_AC_BIAS_EN, PIN_INPUT_PULLDOWN, MUX_MODE6) /* P8_30 - R31 bit 11 */
+
+					/* PRUDAQ external clock input (PRU1 R31 bit 16) */
+					AM33XX_PADCONF(AM335X_PIN_UART1_RXD, PIN_INPUT_PULLDOWN, MUX_MODE6)      /* P9_26 - R31 bit 16 (PRUDAQ ADC clock) */
+
+					/*
+					 * 14-bit mode expansion (PRU1 R31 bits 12-13) - DISABLED by default
+					 *
+					 * These pins conflict with eMMC (mmc1). To enable 14-bit mode:
+					 * 1. Disable eMMC in main device tree
+					 * 2. Boot from microSD card only
+					 * 3. Uncomment the lines below
+					 * 4. Update PRU firmware to sample 14 bits
+					 *
+					 * WARNING: Enabling these will make eMMC inaccessible!
+					 */
+					/* AM33XX_PADCONF(AM335X_PIN_GPMC_CSN3, PIN_INPUT_PULLDOWN, MUX_MODE6) */  /* P8_20 - R31 bit 12 (mmc1_cmd) */
+					/* AM33XX_PADCONF(AM335X_PIN_GPMC_CSN2, PIN_INPUT_PULLDOWN, MUX_MODE6) */  /* P8_21 - R31 bit 13 (mmc1_clk) */
+
+					/*
+					 * P9_31 PWM Clock Option for PRUDAQ (configured in Fragments 2-4)
+					 *
+					 * P9_31 generates PWM clock signal for PRUDAQ ADC via ehrpwm0A (mode 1).
+					 * PWM channels are automatically exported by this overlay and ready to use.
+					 *
+					 * IMPORTANT: Always disable PWM before changing period or duty_cycle.
+					 * Changing parameters while enabled may lock the PWM subsystem.
+					 *
+					 * Example PWM setup for 10 MHz clock (50% duty cycle):
+					 *   echo 0 > /sys/class/pwm/pwmchip0/pwm0/enable        # Disable first
+					 *   echo 100 > /sys/class/pwm/pwmchip0/pwm0/period      # 100ns = 10 MHz
+					 *   echo 50 > /sys/class/pwm/pwmchip0/pwm0/duty_cycle   # 50% duty
+					 *   echo 1 > /sys/class/pwm/pwmchip0/pwm0/enable        # Enable
+					 *
+					 * Wire P9_31 (PWM output) to P9_26 (PRUDAQ clock input) with a short jumper.
+					 * See documentation for more frequencies and signal integrity tips.
+					 *
+					 * Note: P9_31 is not configured as a PRU1 input in this overlay.
+					 */
+				>;
+			};
+		};
+	};
+
+	/*
+	 * Fragment 1: Enable PRU Subsystem
+	 *
+	 * Enables the PRUSS (PRU Subsystem) and applies the pin configuration
+	 * defined in Fragment 0. This activates both PRU0 and PRU1 cores.
+	 */
+	fragment@1 {
+		target = <&pruss>;
+		__overlay__ {
+			status = "okay";
+			pinctrl-names = "default";
+			pinctrl-0 = <&beaglelogic_pins>;
+		};
+	};
+
+	/*
+	 * Fragment 2: Optional PWM for PRUDAQ Clock Generation
+	 *
+	 * Enables ehrpwm0 on P9_31 for optional PRUDAQ clock generation.
+	 * This is completely optional - if you don't use PRUDAQ, this fragment
+	 * does nothing harmful and can be left enabled.
+	 *
+	 * After loading this overlay, PWM will be available at:
+	 * /sys/class/pwm/pwmchip0/
+	 */
+	fragment@2 {
+		target = <&am33xx_pinmux>;
+		__overlay__ {
+			pwm_P9_31_pins: pinmux_pwm_P9_31_pins {
+				pinctrl-single,pins = <
+					AM33XX_PADCONF(AM335X_PIN_MCASP0_ACLKX, PIN_OUTPUT_PULLDOWN, MUX_MODE1)  /* P9_31 - ehrpwm0A */
+				>;
+			};
+		};
+	};
+
+	fragment@3 {
+		target = <&epwmss0>;
+		__overlay__ {
+			status = "okay";
+		};
+	};
+
+	fragment@4 {
+		target = <&ehrpwm0>;
+		__overlay__ {
+			status = "okay";
+			pinctrl-names = "default";
+			pinctrl-0 = <&pwm_P9_31_pins>;
+		};
+	};
+
+	/*
+	 * Fragment 5: BeagleLogic Device Configuration
+	 *
+	 * Creates the BeagleLogic device node with default capture settings.
+	 * The kernel driver (beaglelogic.ko) binds to this compatible string
+	 * and creates /dev/beaglelogic character device.
+	 *
+	 * Default settings can be changed at runtime via sysfs:
+	 * /sys/devices/virtual/misc/beaglelogic/
+	 */
+	fragment@5 {
 		target-path="/";
 		__overlay__ {
-			/* Add default settings for the LA core */
 			pru-beaglelogic {
 				compatible = "beaglelogic,beaglelogic";
+				status = "okay";
+
 				samplerate = <50000000>;	/* All (100 / n) MHz sample rates, n = 1,2,... */
 				sampleunit = <1>;		/* 0:16-bit samples, 1:8-bit samples */
 				triggerflags = <0>; 		/* 0:one-shot, 1:continuous */
 
-				prus = <&pru0>, <&pru1>;
+				/* PRU references */
+				ti,prus = <&pru0>, <&pru1>;
+
+				/*
+				 * Interrupt configuration for kernel 6.x / pru-software-support-package v6.5+
+				 * Format: <sysevt channel host>
+				 *
+				 * BeagleLogic interrupt mapping:
+				 * - Event 22 (SYSEV_PRU0_TO_ARM_A): PRU0 signals buffer ready (from_bl_1)
+				 * - Event 23 (SYSEV_ARM_TO_PRU0_A): Legacy ARM->PRU signal (to_bl, NOT USED in 6.x)
+				 * - Event 24 (SYSEV_PRU0_TO_ARM_B): PRU0 signals second buffer ready (from_bl_2)
+				 *
+				 * Event 23 routing:
+				 * - Configured here for backward compatibility with PRU firmware
+				 * - Routes: Event 23 -> Channel 1 -> Host 1 (PRU0 R31.31)
+				 * - BUT: In kernel 6.x, the kernel CANNOT trigger Event 23 because
+				 *   irq_pruss_intc driver only supports ARM-bound events (hosts 2-9)
+				 *
+				 * Actual stop mechanism (kernel 6.x):
+				 * - Driver writes directly to PRU0 DRAM offset 0x18 (context.stop_flag)
+				 * - PRU0 firmware polls this flag once per buffer in continuous mode
+				 * - See beaglelogic_request_stop() in kernel/beaglelogic.c
+				 */
 				interrupt-parent = <&pruss_intc>;
-				interrupts = <22>, <23>, <24>;
+				interrupts = <22 4 4>, <23 1 1>, <24 5 5>;
 				interrupt-names = "from_bl_1", "to_bl", "from_bl_2";
 			};
 		};
